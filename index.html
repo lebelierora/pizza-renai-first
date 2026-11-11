@@ -60,6 +60,18 @@
         filter:drop-shadow(0 14px 14px rgba(0,0,0,.4));
       }
       #charFigure.sprite img{ width:100%; height:auto; display:block; }
+      /* ドット絵（ピクセルアート）立ち絵 */
+      #charFigure.pixel{
+        height:auto; width:min(62vw,300px);
+        filter:drop-shadow(0 12px 10px rgba(0,0,0,.4));
+      }
+      #charFigure.pixel svg{ width:100%; height:auto; display:block; }
+      .pixel-thumb{
+        width:70px; height:82px; flex:none;
+        margin-right:12px; display:inline-block;
+      }
+      .pixel-thumb svg{ width:100%; height:100%; display:block; }
+      .status-hero .pixel-thumb{ width:96px; height:112px; }
       /* ---------- タイトル画面：描き外観（昼）＋広場に立つキャスト ---------- */
       #titleScreen{
         overflow:hidden; padding:0; justify-content:flex-start; align-items:stretch;
@@ -296,6 +308,7 @@
       @media (max-height:520px){
         #charFigure{ height:56dvh; }
         #charFigure.sprite{ height:auto; width:min(64vw,320px); }
+        #charFigure.pixel{ width:min(46vw,210px); }
         #charLayer.sprite-mode{ padding-bottom:134px; }
         #dialog{ min-height:112px; padding-top:24px; }
         #dialogText{ font-size:15.5px; min-height:48px; }
@@ -917,52 +930,279 @@ var el = $("bg-" + name); if(el) el.classList.add("active");
 function nightActive(){
 return $("bg-night").classList.contains("active") || $("bg-nightin").classList.contains("active");
 }
-/* 立ち絵：現存する最古世代（v20）の切り抜き一式。新世代の立ち絵は使わない */
-var CHAR_IMG = {
-hero: { normal:"hero-normal.png", noapron:"hero-normal.png", panic:"hero-panic.png", blush:"hero-shy.png", shy:"hero-shy.png", serious:"hero-serious.png"},
-asakura: { normal:"shiori-normal.png", tease:"shiori-tease.png", blush:"shiori-shy.png", serious:"shiori-honne.png"},
-hina: { normal:"hina-normal.png", excited:"hina-excited.png", expect:"hina-expect.png", blush:"hina-shy.png", serious:"hina-serious.png"},
-aoi: { normal:"tsumugi-normal.png", shy:"tsumugi-confused.png", confused:"tsumugi-confused.png", blush:"tsumugi-shy.png", smile:"tsumugi-smile.png"},
-manager: { normal:"master-normal.png", genki:"master-genki.png", craft:"master-craft.png", warm:"master-warm.png"}
+/* ================= ドット絵（ピクセルアート）立ち絵 ================= */
+/* 本編の立ち絵はすべてコード描画のSVGドット絵。48×56ピクセルのグリッドに
+   矩形を置いて描く。ベース（髪・服）はキャラ固定、目・口・眉・頬で表情を作る */
+function R(x, y, w, h, c, o){
+  return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + c + '"' + (o ? ' opacity="' + o + '"' : '') + '/>';
+}
+/* 表情テーブル：場面の ex 指定をそのまま受ける */
+var EXPR_TABLE = {
+  hero: {
+    normal:{ eyes:"open", mouth:"smile", brow:"normal", blush:0 },
+    noapron:{ eyes:"open", mouth:"smile", brow:"normal", blush:0 },
+    panic:{ eyes:"wide", mouth:"big", brow:"up", blush:0, extra:"sweat" },
+    serious:{ eyes:"open", mouth:"flat", brow:"angle", blush:0 },
+    shy:{ eyes:"down", mouth:"wavy", brow:"up", blush:2 },
+    blush:{ eyes:"down", mouth:"wavy", brow:"up", blush:2 }
+  },
+  asakura: {
+    normal:{ eyes:"open", mouth:"smile", brow:"normal", blush:0 },
+    tease:{ eyes:"wink", mouth:"smirk", brow:"normal", blush:1 },
+    serious:{ eyes:"down", mouth:"flat", brow:"worry", blush:0 },
+    blush:{ eyes:"down", mouth:"smile", brow:"worry", blush:2 },
+    shy:{ eyes:"down", mouth:"smile", brow:"worry", blush:2 }
+  },
+  hina: {
+    normal:{ eyes:"open", mouth:"open", brow:"normal", blush:1 },
+    excited:{ eyes:"sparkle", mouth:"big", brow:"up", blush:1, extra:"sparkle" },
+    expect:{ eyes:"sparkle", mouth:"o", brow:"up", blush:1, extra:"sparkle" },
+    serious:{ eyes:"open", mouth:"pout", brow:"angle", blush:0 },
+    blush:{ eyes:"happy", mouth:"smile", brow:"normal", blush:2 },
+    shy:{ eyes:"happy", mouth:"smile", brow:"normal", blush:2 }
+  },
+  aoi: {
+    normal:{ eyes:"open", mouth:"tiny", brow:"normal", blush:0 },
+    shy:{ eyes:"down", mouth:"wavy", brow:"worry", blush:1 },
+    confused:{ eyes:"down", mouth:"wavy", brow:"worry", blush:1, extra:"sweat" },
+    blush:{ eyes:"down", mouth:"tiny", brow:"worry", blush:2 },
+    smile:{ eyes:"happy", mouth:"smile", brow:"normal", blush:1 }
+  },
+  manager: {
+    normal:{ eyes:"open", mouth:"smile", brow:"normal", blush:0 },
+    genki:{ eyes:"sparkle", mouth:"big", brow:"up", blush:0, extra:"sparkle" },
+    craft:{ eyes:"open", mouth:"flat", brow:"angle", blush:0 },
+    warm:{ eyes:"happy", mouth:"smile", brow:"normal", blush:0 }
+  }
 };
-var STATUS_IMG = { hero:"hero-normal.png", asakura:"shiori-normal.png", hina:"hina-normal.png", aoi:"tsumugi-normal.png", manager:"master-normal.png"};
-/* 先読み：タイトル画面の時点で全画像を読み込み＋デコードしておき、場面切り替わりで遅れが出ないようにする */
+function exprFor(ch, ex){
+  var t = EXPR_TABLE[ch];
+  if(t && t[ex]) return t[ex];
+  if(t && t.normal) return t.normal;
+  return { eyes:"open", mouth:"smile", brow:"normal", blush:0 };
+}
+/* 顔の地肌（耳・輪郭）。首は各キャラ側で描く */
+function faceBase(skin){
+  var s = "";
+  s += R(13, 22, 2, 5, skin) + R(33, 22, 2, 5, skin);
+  s += R(17, 13, 14, 1, skin);
+  s += R(15, 14, 18, 17, skin);
+  s += R(17, 31, 14, 3, skin);
+  s += R(20, 34, 8, 1, skin);
+  return s;
+}
+/* 目・眉・口・頬。目は左 x18-20／右 x27-29、口は中央 x22-26 が基準 */
+function faceParts(e, iris, browC){
+  var s = "", L = 18, Rt = 27, mc = "#7c3524";
+  /* 眉 */
+  if(e.brow === "up"){
+    s += R(L - 1, 18, 4, 1, browC) + R(Rt, 18, 4, 1, browC);
+  } else if(e.brow === "angle"){
+    s += R(L - 1, 19, 2, 1, browC) + R(L + 1, 20, 2, 1, browC);
+    s += R(Rt + 2, 19, 2, 1, browC) + R(Rt, 20, 2, 1, browC);
+  } else if(e.brow === "worry"){
+    s += R(L - 1, 20, 2, 1, browC) + R(L + 1, 19, 2, 1, browC);
+    s += R(Rt, 19, 2, 1, browC) + R(Rt + 2, 20, 2, 1, browC);
+  } else {
+    s += R(L - 1, 19, 4, 1, browC) + R(Rt, 19, 4, 1, browC);
+  }
+  /* 目 */
+  function eyeOpen(x, sparkle){
+    var o = R(x, 22, 3, 1, "#2e2019") + R(x, 23, 3, 3, iris) + R(x, 23, 1, 1, "#ffffff");
+    if(sparkle) o += R(x + 2, 24, 1, 1, "#ffffff") + R(x, 25, 1, 1, "#ffffff", ".8");
+    return o;
+  }
+  function eyeHappy(x){
+    return R(x, 24, 1, 1, "#2e2019") + R(x + 1, 23, 1, 1, "#2e2019") + R(x + 2, 24, 1, 1, "#2e2019");
+  }
+  function eyeDown(x){
+    return R(x, 24, 3, 1, "#2e2019") + R(x + 1, 25, 1, 1, iris);
+  }
+  function eyeWide(x){
+    return R(x - 1, 21, 4, 5, "#ffffff") + R(x, 22, 2, 3, iris) + R(x, 22, 1, 1, "#ffffff");
+  }
+  if(e.eyes === "happy"){ s += eyeHappy(L) + eyeHappy(Rt); }
+  else if(e.eyes === "down"){ s += eyeDown(L) + eyeDown(Rt); }
+  else if(e.eyes === "wide"){ s += eyeWide(L) + eyeWide(Rt); }
+  else if(e.eyes === "wink"){ s += eyeOpen(L, false) + R(Rt, 24, 3, 1, "#2e2019"); }
+  else if(e.eyes === "sparkle"){ s += eyeOpen(L, true) + eyeOpen(Rt, true); }
+  else { s += eyeOpen(L, false) + eyeOpen(Rt, false); }
+  /* 鼻 */
+  s += R(23, 27, 1, 1, "#d89a6a");
+  /* 口 */
+  if(e.mouth === "smile"){ s += R(22, 29, 1, 1, mc) + R(23, 30, 2, 1, mc) + R(25, 29, 1, 1, mc); }
+  else if(e.mouth === "open"){ s += R(23, 29, 2, 2, mc) + R(23, 30, 2, 1, "#e2707a"); }
+  else if(e.mouth === "big"){ s += R(22, 29, 4, 3, mc) + R(23, 31, 2, 1, "#e2707a"); }
+  else if(e.mouth === "flat"){ s += R(22, 30, 4, 1, mc); }
+  else if(e.mouth === "smirk"){ s += R(23, 30, 3, 1, mc) + R(26, 29, 1, 1, mc); }
+  else if(e.mouth === "pout"){ s += R(23, 30, 2, 1, mc) + R(23, 29, 2, 1, mc, ".45"); }
+  else if(e.mouth === "wavy"){ s += R(22, 30, 1, 1, mc) + R(23, 29, 1, 1, mc) + R(24, 30, 1, 1, mc) + R(25, 29, 1, 1, mc); }
+  else if(e.mouth === "o"){ s += R(23, 29, 2, 2, mc); }
+  else { s += R(23, 30, 2, 1, mc); } /* tiny */
+  /* 頬 */
+  if(e.blush){
+    var bc = e.blush >= 2 ? "#f28ba8" : "#f6aec2";
+    s += R(16, 27, 3, 1, bc, ".85") + R(17, 28, 2, 1, bc, ".85");
+    s += R(29, 27, 3, 1, bc, ".85") + R(29, 28, 2, 1, bc, ".85");
+  }
+  /* 付属（汗・きらきら） */
+  if(e.extra === "sweat"){
+    s += R(37, 14, 2, 2, "#a8dcf5") + R(36, 16, 4, 3, "#a8dcf5") + R(37, 16, 1, 1, "#ffffff");
+  }
+  if(e.extra === "sparkle"){
+    s += R(5, 13, 1, 3, "#ffd83e") + R(4, 14, 3, 1, "#ffd83e");
+    s += R(42, 20, 1, 3, "#ffd83e") + R(41, 21, 3, 1, "#ffd83e");
+    s += R(40, 8, 1, 2, "#ffffff") + R(39, 9, 3, 1, "#ffffff", ".0");
+  }
+  return s;
+}
+/* キャラ別ベース（髪・服・小物）＋表情で1枚のドット絵SVGを返す */
+function pixelCharSVG(ch, ex){
+  var e = exprFor(ch, ex), s = "";
+  var skin, skinSh;
+  if(ch === "hero"){
+    skin = "#f6cfa8"; skinSh = "#e0aa76";
+    var hair = "#6b4429", hairL = "#8a5f36";
+    /* 体：白Tシャツ（＋赤エプロン） */
+    s += R(21, 32, 6, 7, skinSh);
+    s += R(14, 37, 20, 2, "#f4efe3") + R(11, 39, 26, 17, "#f4efe3");
+    s += R(11, 39, 3, 17, "#ddd2ba") + R(34, 39, 3, 17, "#ddd2ba");
+    if(ex !== "noapron"){
+      s += R(18, 37, 3, 6, "#c33b26") + R(27, 37, 3, 6, "#c33b26");
+      s += R(17, 42, 14, 14, "#c33b26") + R(17, 52, 14, 4, "#a92c1a");
+      s += R(21, 47, 6, 1, "#a92c1a") + R(21, 47, 1, 4, "#a92c1a") + R(26, 47, 1, 4, "#a92c1a");
+    }
+    s += faceBase(skin);
+    /* ぼさっとした茶髪：ギザギザの前髪とツンツンした毛束 */
+    s += R(16, 4, 4, 2, hair) + R(22, 3, 4, 3, hair) + R(28, 4, 5, 2, hair);
+    s += R(15, 6, 18, 5, hair) + R(18, 7, 6, 2, hairL);
+    s += R(15, 11, 18, 2, hair);
+    s += R(16, 13, 3, 2, hair) + R(21, 13, 2, 3, hair) + R(25, 13, 3, 2, hair) + R(29, 13, 2, 2, hair);
+    s += R(13, 11, 3, 11, hair) + R(32, 11, 3, 11, hair);
+    s += faceParts(e, "#4a2c17", hair);
+  }
+  else if(ch === "asakura"){
+    skin = "#f8d7b8"; skinSh = "#e6b98d";
+    var hairS = "#7a4a2c", hairSL = "#9c6c40", hairSD = "#5f3820";
+    /* 後ろ髪：腰まで届く長い髪 */
+    s += R(8, 10, 32, 40, hairS) + R(8, 50, 6, 3, hairS) + R(34, 50, 6, 3, hairS);
+    s += R(10, 44, 3, 8, hairSD) + R(35, 44, 3, 8, hairSD);
+    /* 体：緑カーディガン＋クリーム色トップス */
+    s += R(21, 32, 6, 7, skinSh);
+    s += R(13, 37, 22, 2, "#5f7d43") + R(10, 39, 28, 17, "#5f7d43");
+    s += R(10, 39, 3, 17, "#4e6836") + R(35, 39, 3, 17, "#4e6836");
+    s += R(19, 39, 10, 17, "#f6ecd7") + R(19, 39, 10, 2, "#efe0c2");
+    /* ネックレス */
+    s += R(21, 41, 1, 1, "#c9973f") + R(26, 41, 1, 1, "#c9973f") + R(23, 43, 2, 2, "#e8b93e");
+    s += faceBase(skin);
+    /* 前髪は斜めに流し、サイドはゆるく巻いて長く */
+    s += R(16, 4, 16, 2, hairS) + R(14, 6, 20, 5, hairS) + R(18, 7, 7, 2, hairSL);
+    s += R(15, 11, 18, 2, hairS) + R(15, 13, 9, 2, hairS) + R(29, 13, 4, 1, hairS);
+    s += R(12, 12, 4, 26, hairS) + R(12, 38, 3, 7, hairS) + R(13, 45, 3, 4, hairS);
+    s += R(32, 12, 4, 26, hairS) + R(33, 38, 3, 7, hairS) + R(32, 45, 3, 4, hairS);
+    s += R(13, 20, 1, 14, hairSL) + R(34, 20, 1, 14, hairSL);
+    /* 金色の小さいリボン留め（向かって右） */
+    s += R(34, 9, 3, 3, "#e8b93e") + R(38, 9, 3, 3, "#e8b93e") + R(37, 10, 1, 1, "#b98424");
+    s += faceParts(e, "#54301c", hairSD);
+  }
+  else if(ch === "hina"){
+    skin = "#f6c79c"; skinSh = "#e0a06a";
+    var hairH = "#c56a2e", hairHL = "#e08f42", hairHD = "#a3541f";
+    /* 高いポニーテール（向かって右へ流れ落ちる） */
+    s += R(31, 0, 6, 9, hairH) + R(33, 8, 7, 20, hairH) + R(34, 28, 5, 6, hairH);
+    s += R(35, 10, 2, 14, hairHL);
+    /* サイドのゆる巻き */
+    s += R(11, 13, 5, 18, hairH) + R(12, 31, 4, 5, hairH);
+    /* 体：黄色カーディガン＋白T */
+    s += R(21, 32, 6, 7, skinSh);
+    s += R(13, 37, 22, 2, "#f0b73e") + R(10, 39, 28, 17, "#f0b73e");
+    s += R(10, 39, 3, 17, "#d99e2b") + R(35, 39, 3, 17, "#d99e2b");
+    s += R(20, 39, 8, 17, "#fdfaf2");
+    s += R(19, 43, 1, 1, "#8a5f36") + R(19, 48, 1, 1, "#8a5f36") + R(28, 43, 1, 1, "#8a5f36") + R(28, 48, 1, 1, "#8a5f36");
+    s += faceBase(skin);
+    /* 前髪＋跳ねた毛束 */
+    s += R(23, 2, 2, 3, hairH);
+    s += R(15, 5, 18, 6, hairH) + R(18, 6, 7, 2, hairHL);
+    s += R(15, 11, 18, 2, hairH);
+    s += R(17, 13, 3, 2, hairH) + R(23, 13, 2, 2, hairH) + R(28, 13, 3, 2, hairH);
+    s += R(13, 11, 3, 12, hairH) + R(32, 11, 3, 8, hairH);
+    /* 黄色シュシュ */
+    s += R(28, 3, 7, 3, "#ffd83e") + R(29, 4, 1, 1, "#e0b62a") + R(32, 4, 1, 1, "#e0b62a");
+    s += faceParts(e, "#6e3c14", hairHD);
+  }
+  else if(ch === "aoi"){
+    skin = "#f9dcc4"; skinSh = "#eac39e";
+    var hairA = "#262a40", hairAL = "#3c4260", hairAD = "#171a2a";
+    /* 後ろ髪：まっすぐ長く、体の脇まで */
+    s += R(7, 8, 34, 48, hairA) + R(9, 20, 2, 30, hairAL, ".5");
+    /* 体：紺セーター＋白襟 */
+    s += R(21, 32, 6, 7, skinSh);
+    s += R(13, 37, 22, 2, "#39436a") + R(10, 39, 28, 17, "#39436a");
+    s += R(10, 39, 3, 17, "#2f3757") + R(35, 39, 3, 17, "#2f3757");
+    s += R(19, 37, 4, 3, "#f4f2ec") + R(25, 37, 4, 3, "#f4f2ec");
+    /* 抱えたノート（スケッチブック） */
+    s += R(17, 43, 14, 13, "#dcbc85") + R(17, 43, 14, 2, "#c8a568");
+    s += R(18, 46, 1, 1, "#8a6a3c") + R(18, 49, 1, 1, "#8a6a3c") + R(18, 52, 1, 1, "#8a6a3c");
+    s += R(21, 48, 7, 1, "#b08d55") + R(21, 51, 5, 1, "#b08d55");
+    s += R(13, 44, 5, 12, "#2f3757") + R(30, 44, 5, 12, "#2f3757");
+    s += R(16, 49, 2, 4, skin) + R(30, 49, 2, 4, skin);
+    s += faceBase(skin);
+    /* 前髪は真っ直ぐ、サイドは頬の脇をまっすぐ長く */
+    s += R(16, 4, 16, 2, hairA) + R(14, 6, 20, 5, hairA) + R(18, 6, 8, 2, hairAL);
+    s += R(15, 11, 18, 3, hairA);
+    s += R(11, 11, 4, 34, hairA) + R(33, 11, 4, 34, hairA);
+    s += R(11, 45, 4, 3, hairAD) + R(33, 45, 4, 3, hairAD);
+    /* 銀色のヘアピン（向かって右） */
+    s += R(33, 17, 4, 1, "#dfe5ee") + R(33, 19, 3, 1, "#c6cedd");
+    s += faceParts(e, "#2c3247", hairAD);
+  }
+  else if(ch === "manager"){
+    skin = "#eebd92"; skinSh = "#d69f68";
+    /* 体：黒ポロ＋赤い柄エプロン */
+    s += R(21, 32, 6, 7, skinSh);
+    s += R(13, 37, 22, 2, "#2c2c31") + R(10, 39, 28, 17, "#2c2c31");
+    s += R(20, 37, 8, 2, "#1f1f23");
+    s += R(17, 36, 3, 6, "#7d97ab") + R(28, 36, 3, 6, "#7d97ab");
+    s += R(16, 42, 16, 14, "#b8402c") + R(16, 52, 16, 4, "#9c3423");
+    s += R(19, 45, 2, 2, "#d2694c") + R(26, 49, 2, 2, "#d2694c") + R(21, 52, 2, 2, "#d2694c") + R(28, 44, 2, 2, "#d2694c");
+    s += faceBase(skin);
+    /* 軽い無精ひげ（顎まわりの点描） */
+    s += R(17, 32, 1, 1, "#9a8874", ".85") + R(20, 34, 1, 1, "#9a8874", ".85") + R(24, 35, 1, 1, "#9a8874", ".85") +
+         R(28, 34, 1, 1, "#9a8874", ".85") + R(31, 32, 1, 1, "#9a8874", ".85") + R(22, 33, 1, 1, "#9a8874", ".7") + R(26, 33, 1, 1, "#9a8874", ".7");
+    /* キャップの下の短い髪 */
+    s += R(13, 12, 3, 9, "#2e2a28") + R(32, 12, 3, 9, "#2e2a28");
+    /* バッジ付きキャップ */
+    s += R(17, 2, 14, 2, "#f0e7d2") + R(14, 4, 20, 7, "#f0e7d2");
+    s += R(11, 11, 26, 3, "#ddd0b0") + R(11, 13, 26, 1, "#c4b28c");
+    s += R(16, 6, 3, 3, "#5b84b8") + R(17, 7, 1, 1, "#ffffff");
+    s += R(28, 5, 3, 3, "#eebd45") + R(29, 6, 1, 1, "#ffffff");
+    s += faceParts(e, "#2e2018", "#2e2a28");
+  }
+  return '<svg viewBox="0 0 48 56" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' + s + '</svg>';
+}
+/* 先読み：タイトル画面で使う全身イラストだけを読み込んでおく（本編の立ち絵はドット絵なので対象外） */
 var PRELOADED = [];
 (function(){
-var files = ["hero-body.png","hero-normal.png","hero-panic.png","hero-shy.png","hero-serious.png",
-"shiori-body.png","shiori-normal.png","shiori-tease.png","shiori-shy.png","shiori-honne.png",
-"hina-body.png","hina-normal.png","hina-excited.png","hina-expect.png","hina-shy.png","hina-serious.png",
-"tsumugi-body.png","tsumugi-normal.png","tsumugi-confused.png","tsumugi-shy.png","tsumugi-smile.png",
-"master-body.png","master-normal.png","master-genki.png","master-craft.png","master-warm.png"];
-for(var i = 0; i < files.length; i++){
-var im = new Image();
-im.src = "assets/" + files[i];
-if(im.decode){ im.decode().catch(function(){});}
-PRELOADED.push(im);
-}
-window.__preloadedCount = PRELOADED.length;
+  var files = ["hero-body.png", "shiori-body.png", "hina-body.png", "tsumugi-body.png", "master-body.png"];
+  for(var i = 0; i < files.length; i++){
+    var im = new Image();
+    im.src = "assets/" + files[i];
+    if(im.decode){ im.decode().catch(function(){}); }
+    PRELOADED.push(im);
+  }
+  window.__preloadedCount = PRELOADED.length;
 })();
 function setChar(ch, ex){
-var layer = $("charLayer");
-if(!ch){
-charEl.classList.remove("show"); charEl.classList.remove("sprite");
-layer.classList.remove("sprite-mode");
-charEl.innerHTML = ""; return;
-}
-var file = (CHAR_IMG[ch] && (CHAR_IMG[ch][ex] || CHAR_IMG[ch].normal)) || null;
-if(!file){ return;}
-var cimg = charEl.querySelector("img");
-if(!cimg){
-charEl.innerHTML = "";
-cimg = document.createElement("img");
-cimg.alt = "";
-cimg.decoding = "sync";
-charEl.appendChild(cimg);
-}
-var csrc = "assets/" + file;
-if(cimg.getAttribute("src")!== csrc){ cimg.src = csrc;}
-charEl.classList.add("sprite"); layer.classList.add("sprite-mode");
-charEl.classList.add("show");
+  var layer = $("charLayer");
+  if(!ch){
+    charEl.classList.remove("show"); charEl.classList.remove("sprite"); charEl.classList.remove("pixel");
+    layer.classList.remove("sprite-mode");
+    charEl.innerHTML = ""; return;
+  }
+  charEl.innerHTML = pixelCharSVG(ch, ex);
+  charEl.classList.remove("sprite"); charEl.classList.add("pixel");
+  layer.classList.add("sprite-mode");
+  charEl.classList.add("show");
 }
 function chapterCard(text){
 var d = document.createElement("div");
@@ -1127,16 +1367,16 @@ var rows = "";
 var heroName = state? state.name: "あなた";
 var safeName = heroName.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 rows += '<div class="status-hero">' +
-'<img class="status-thumb" src="assets/' + STATUS_IMG.hero + '" alt="" />' +
+'<span class="status-thumb pixel-thumb">' + pixelCharSVG("hero", "normal") + '</span>' +
 '<div class="status-hero-body"><div class="status-hero-name">' + safeName + '<span class="role">主人公</span></div>' +
 '<div class="status-hero-prof">20歳｜調理専門学校 2年生<br />ピザ屋で働き始めた新入りバイト<br />ピザ作りは、まだまだ練習中<br />不器用だけど、何事にも一生懸命</div></div></div>';
 ["asakura","hina","aoi"].forEach(function(k){
 rows += '<div class="status-row"><span class="status-who">' +
-'<img class="status-thumb" src="assets/' + STATUS_IMG[k] + '" alt="" />' + NAMES[k] + '</span>' +
+'<span class="status-thumb pixel-thumb">' + pixelCharSVG(k, "normal") + '</span>' + NAMES[k] + '</span>' +
 '<span class="hearts">' + hearts(state? state.aff[k]: 0) + '</span></div>';
 });
 rows += '<div class="status-hero" style="border-bottom:none;border-top:2px solid #d9c3a5;margin-top:10px;padding-top:12px;margin-bottom:0;padding-bottom:2px;">' +
-'<img class="status-thumb" src="assets/' + STATUS_IMG.manager + '" alt="" />' +
+'<span class="status-thumb pixel-thumb">' + pixelCharSVG("manager", "normal") + '</span>' +
 '<div class="status-hero-body"><div class="status-hero-name">マスター<span class="role">店主</span></div>' +
 '<div class="status-hero-prof">40代、気持ちは20代！<br />赤いピザ屋の店主<br />新しいことが好きな、陽気な兄貴分<br />ピザを焼くときは、頼れる職人<br />主人公と常連たちを温かく見守る</div></div></div>';
 $("statusRows").innerHTML = rows;
